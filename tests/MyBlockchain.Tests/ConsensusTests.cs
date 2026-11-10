@@ -7,53 +7,57 @@ namespace MyBlockchain.Tests
     public class ConsensusTests
     {
         [TestMethod]
-        public void UntouchedChain_IsValid()
+        public void IsValid_ReturnsTrue_ForUntouchedChain()
         {
             var bc = new Blockchain();
             bc.AddBlock("A -> B: 10");
-            bc.AddBlock("B -> C: 5");
+            bc.AddBlock("B -> C: 3");
 
             Assert.IsTrue(bc.IsValid());
         }
 
         [TestMethod]
-        public void TamperedData_IsInvalid()
+        public void IsValid_ReturnsFalse_WhenDataIsTampered()
         {
             var bc = new Blockchain();
             bc.AddBlock("A -> B: 10");
-            var block = bc.AddBlock("B -> C: 5");
+            bc.AddBlock("B -> C: 3");
 
-            block.Data = "B -> C: 100"; // attacker changes the data
+            bc.Chain[1].Data = "A -> B: 1000";
 
             Assert.IsFalse(bc.IsValid());
         }
 
         [TestMethod]
-        public void RehashedData_IsInvalid()
+        public void IsValid_ReturnsFalse_WhenTamperedBlockIsRehashed()
         {
             var bc = new Blockchain();
             bc.AddBlock("A -> B: 10");
-            bc.AddBlock("B -> C: 5");
+            bc.AddBlock("B -> C: 3");
 
-            bc.Chain[1].Data = "B -> C: 100"; // attacker changes the data
-            bc.Chain[1].Rehash(); // attacker recalculates the hash
+            // Attacker edits block 1 AND recalculates its hash...
+            bc.Chain[1].Data = "A -> B: 1000";
+            bc.Chain[1].Rehash();
 
-            // The chain is still invalid because the previous block's hash doesn't match the new hash.
+            // ...but block 2 still points to the old hash.
             Assert.IsFalse(bc.IsValid());
         }
 
         [TestMethod]
-        public void RehashedData_IsValid()
+        public void IsValid_ReturnsFalse_WhenBlockHasNoProofOfWork()
         {
-            var bc = new Blockchain();
+            var bc = new Blockchain(difficulty: 3);
             bc.AddBlock("A -> B: 10");
-            bc.Chain[1].Data = "B -> C: 100"; // attacker changes the data
-            bc.Chain[1].Rehash(); // attacker recalculates the hash
+            var last = bc.Last;
 
-            bc.AddBlock("B -> C: 5");
-
-            // The chain is valid because the new block's previous hash matches the recalculated hash of the tampered block.
-            Assert.IsTrue(bc.IsValid());
+            //Has matches the content and link is intact (is the last block),
+            // but it was NOT mined: Only the PoW check can catch this.
+            for (int i = 0; last.MeetsDifficulty(3); i++)
+            {
+                last.Data = $"tampered-{i}";
+                last.Rehash();
+            }
+            Assert.IsFalse(bc.IsValid());
         }
 
     }

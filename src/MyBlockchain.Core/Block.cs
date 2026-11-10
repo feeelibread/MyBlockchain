@@ -1,35 +1,53 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace MyBlockchain.Core
+namespace MyBlockchain.Core;
+
+public class Block
 {
-    public class Block
+    public int Index { get; }
+    public DateTime Timestamp { get; }
+    public string PreviousHash { get; }
+    public long Nonce { get; private set; }
+    public string Hash { get; private set; }
+
+    // Public setter on purpose: lets tests simulate tampering.
+    public string Data { get; set; }
+
+    public Block(int index, string data, string previousHash)
     {
-        public int Index { get; set; }
-        public DateTime Timestamp { get; }
-        public string PreviousHash { get; }
-        public string Hash { get; private set; }
+        Index = index;
+        Timestamp = DateTime.UtcNow;
+        Data = data;
+        PreviousHash = previousHash;
+        Hash = ComputeHash();
+    }
 
-        // Public setter on purpose: lets tests simulate tampering.
-        public string Data { get; set; }
+    // The nonce is now part of the hashed content.
+    public string ComputeHash()
+    {
+        var raw = $"{Index}|{Timestamp:O}|{Data}|{PreviousHash}|{Nonce}";
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
+        return Convert.ToHexString(bytes);
+    }
 
-        public Block(int index, string data, string previousHash)
+    // Proof of Work: try nonces until the hash starts with `difficulty` zeros.
+    public void Mine(int difficulty)
+    {
+        var prefix = new string('0', difficulty);
+        Nonce = 0;
+        Hash = ComputeHash();
+
+        while (!Hash.StartsWith(prefix, StringComparison.Ordinal))
         {
-            Index = index;
-            Data = data;
-            PreviousHash = previousHash;
-            Timestamp = DateTime.UtcNow;
+            Nonce++;
             Hash = ComputeHash();
         }
-
-        public string ComputeHash()
-        {
-            var raw = $"{Index}|{Timestamp}|{Data}|{PreviousHash}";
-            var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
-            return Convert.ToHexString(bytes);
-        }
-
-        // Used by tests to simulate an attacker who recalculates a hash.
-        public void Rehash() => Hash = ComputeHash();
     }
+
+    public bool MeetsDifficulty(int difficulty) =>
+        Hash.StartsWith(new string('0', difficulty), StringComparison.Ordinal);
+
+    // Used by tests to simulate an attacker who recalculates a hash without mining.
+    public void Rehash() => Hash = ComputeHash();
 }
