@@ -29,5 +29,15 @@ namespace MyBlockchain.Tests
             Assert.AreEqual(1, block.Index);
             Assert.AreEqual(genesis.Hash, block.PreviousHash);
         }
+
+        [TestMethod]
+        public void AddBlock_MinesBlockAccordingToChainDifficulty()
+        {
+            var bc = new Blockchain(difficulty: 3);
+            var block = bc.AddBlock("A -> B: 10");
+
+            Assert.IsTrue(block.MeetsDifficulty(bc.Difficulty));
+            Assert.IsTrue(bc.Chain[0].MeetsDifficulty(bc.Difficulty)); //genesis is mined too
+        }
     }
 }

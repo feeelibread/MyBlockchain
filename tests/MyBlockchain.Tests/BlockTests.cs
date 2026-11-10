@@ -27,5 +27,15 @@ namespace MyBlockchain.Tests
             Assert.AreNotEqual(before, block.ComputeHash());
         }
 
+        [TestMethod]
+        public void Mine_ProduceHashWithRequiredLeadingZeros()
+        {
+            var block = new Block(1, "data", "prev");
+            block.Mine(3);
+
+            Assert.StartsWith("000", block.Hash);
+            Assert.AreEqual(block.ComputeHash(), block.Hash);
+        }
+
     }
 }
