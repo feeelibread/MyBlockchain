@@ -11,14 +11,14 @@ public class Block
     public long Nonce { get; private set; }
     public string Hash { get; private set; }
 
-    // Public setter on purpose: lets tests simulate tampering.
-    public string Data { get; set; }
+    // Public list on purpose: lets tests simulate tampering.
+    public List<Transaction> Transactions { get; set; } = new();
 
-    public Block(int index, string data, string previousHash)
+    public Block(int index, IEnumerable<Transaction> transaction, string previousHash)
     {
         Index = index;
         Timestamp = DateTime.UtcNow;
-        Data = data;
+        Transactions = transaction.ToList(); // copy, so that the caller can't modify it later
         PreviousHash = previousHash;
         Hash = ComputeHash();
     }
@@ -26,7 +26,8 @@ public class Block
     // The nonce is now part of the hashed content.
     public string ComputeHash()
     {
-        var raw = $"{Index}|{Timestamp:O}|{Data}|{PreviousHash}|{Nonce}";
+        var data = string.Join(";", Transactions.Select(t => t.Serialize()));
+        var raw = $"{Index}|{Timestamp:O}|{data}|{PreviousHash}|{Nonce}";
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
         return Convert.ToHexString(bytes);
     }

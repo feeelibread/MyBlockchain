@@ -1,22 +1,23 @@
 ﻿using MyBlockchain.Core;
 using System.Diagnostics;
 
-Console.WriteLine("Mining cost by difficulty:");
-for (int difficulty = 1; difficulty <= 5; difficulty++)
-{
-    var block = new Block(1, "Felipe -> Victor: 10", "0");
-    var sw = Stopwatch.StartNew();
-    block.Mine(difficulty);
-    sw.Stop();
 
-    Console.WriteLine($"  difficulty {difficulty}: nonce={block.Nonce,9:N0}  time={sw.ElapsedMilliseconds,6} ms  hash={block.Hash[..16]}...");
-}
+var bc = new Blockchain(difficulty: 3);
+
+//Temporary "faucet".
+bc.TryAddTransaction(new(Transaction.SystemAddress, "Felipe", 100));
+bc.MinePendingTransactions();
+
+Console.WriteLine($"Felipe -> Victor 30: {bc.TryAddTransaction(new("Felipe", "Victor", 30))}");
+Console.WriteLine($"Victor -> Robert 50: {bc.TryAddTransaction(new("Victor", "Robert", 50))} (Victor has no confirmed coins yet)");
+bc.MinePendingTransactions();
 
 Console.WriteLine();
-var bc = new Blockchain(difficulty: 4);
-bc.AddBlock("Felipe -> Victor: 10");
-bc.AddBlock("Thais -> Thayna: 3");
 
-Console.WriteLine($"Valid? {bc.IsValid()}");
-bc.Chain[1].Data = "Felipe -> Victor: 100";
-Console.WriteLine($"Valid after tampering? {bc.IsValid()}");
+foreach (var name in new[] { "Felipe", "Victor", "Robert" })
+    Console.WriteLine($"{name,-7} balance: {bc.GetBalance(name)}");
+
+Console.WriteLine($"\nValid? {bc.IsValid()}");
+
+bc.Chain[1].Transactions[0] = new Transaction(Transaction.SystemAddress, "Felipe", 1_000_000);
+Console.WriteLine($"After Tampering: {bc.IsValid()}");
