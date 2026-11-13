@@ -1,29 +1,30 @@
 using MyBlockchain.Core;
+using static MyBlockchain.Tests.TestChains;
 
 namespace MyBlockchain.Tests
 {
-    // Each test is an attack (or the untouched case) on the blockchain. IsValid() must tell them apart.
     [TestClass]
     public class ConsensusTests
     {
         [TestMethod]
-        public void IsValid_ReturnsTrue_ForUntouchedChain()
+        public void IsValid_ReturnsTrue_ForUntouchableChain()
         {
-            var bc = new Blockchain();
-            bc.AddBlock("A -> B: 10");
-            bc.AddBlock("B -> C: 3");
+            var bc = Funded();
+            bc.TryAddTransaction(new Transaction("Felipe", "Alice", 30));
+            bc.MinePendingTransactions();
 
             Assert.IsTrue(bc.IsValid());
         }
 
         [TestMethod]
-        public void IsValid_ReturnsFalse_WhenDataIsTampered()
+        public void IsValid_ReturnsFalse_WhenTransactionIsTampered()
         {
-            var bc = new Blockchain();
-            bc.AddBlock("A -> B: 10");
-            bc.AddBlock("B -> C: 3");
+            var bc = Funded();
+            bc.TryAddTransaction(new Transaction("Felipe", "Alice", 30));
+            bc.MinePendingTransactions();
 
-            bc.Chain[1].Data = "A -> B: 1000";
+            // Tamper with the chain
+            bc.Chain[1].Transactions[0] = new Transaction("Felipe", "Alice", 3000);
 
             Assert.IsFalse(bc.IsValid());
         }
@@ -31,15 +32,15 @@ namespace MyBlockchain.Tests
         [TestMethod]
         public void IsValid_ReturnsFalse_WhenTamperedBlockIsRehashed()
         {
-            var bc = new Blockchain();
-            bc.AddBlock("A -> B: 10");
-            bc.AddBlock("B -> C: 3");
+            var bc = Funded();
+            bc.TryAddTransaction(new Transaction("Felipe", "Alice", 30));
+            bc.MinePendingTransactions();
 
-            // Attacker edits block 1 AND recalculates its hash...
-            bc.Chain[1].Data = "A -> B: 1000";
+            // Attacker edits block 1 AND recalculate its hash...
+            bc.Chain[1].Transactions[0] = new Transaction("Felipe", "Alice", 3000);
             bc.Chain[1].Rehash();
 
-            // ...but block 2 still points to the old hash.
+            // but block 2 still points to the old hash of block 1.
             Assert.IsFalse(bc.IsValid());
         }
 
@@ -47,16 +48,17 @@ namespace MyBlockchain.Tests
         public void IsValid_ReturnsFalse_WhenBlockHasNoProofOfWork()
         {
             var bc = new Blockchain(difficulty: 3);
-            bc.AddBlock("A -> B: 10");
+            bc.TryAddTransaction(new Transaction(Transaction.SystemAddress, "Felipe", 10));
+            bc.MinePendingTransactions();
+
             var last = bc.Last;
 
-            //Has matches the content and link is intact (is the last block),
-            // but it was NOT mined: Only the PoW check can catch this.
-            for (int i = 0; last.MeetsDifficulty(3); i++)
+            for (int i = 0; last.MeetsDifficulty(bc.Difficulty); i++)
             {
-                last.Data = $"tampered-{i}";
+                last.Transactions[0] = new Transaction(Transaction.SystemAddress, "Felipe", 1000 + i);
                 last.Rehash();
             }
+
             Assert.IsFalse(bc.IsValid());
         }
 
