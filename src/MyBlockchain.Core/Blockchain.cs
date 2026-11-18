@@ -19,12 +19,15 @@ public class Blockchain
         _chain.Add(genesis);
     }
 
-    //Validates the transaction and adds it to the mempool (not in the chain yet). Returns false if the transaction is invalid.
+    // Validates the transaction and puts it in the mempool (not in the chain yet).
     public bool TryAddTransaction(Transaction tx)
     {
-        if (String.IsNullOrWhiteSpace(tx.From) || String.IsNullOrWhiteSpace(tx.To)) return false;
+        if (string.IsNullOrWhiteSpace(tx.From) || string.IsNullOrWhiteSpace(tx.To)) return false;
         if (tx.From == tx.To) return false;
         if (tx.Amount <= 0) return false;
+
+        if (!tx.HasValidSignature()) return false;   // is the sender really the owner?
+        if (IsKnown(tx.Id)) return false;            // replay protection
 
         if (!tx.IsSystem && GetAvailableBalance(tx.From) < tx.Amount) return false;
 
@@ -32,7 +35,7 @@ public class Blockchain
         return true;
     }
 
-    // Packs all pending transactions into a new block, mines it, and adds it to the chain.
+    // Packs all pending transactions into a new mined block.
     public Block? MinePendingTransactions()
     {
         if (_pending.Count == 0) return null;
@@ -44,21 +47,25 @@ public class Blockchain
         return block;
     }
 
-    //Confirmed Balance: only transactions already inside mined blocks.
+    // Confirmed balance: only transactions already inside mined blocks.
     public decimal GetBalance(string address)
     {
         decimal balance = 0;
         foreach (var tx in _chain.SelectMany(b => b.Transactions))
         {
-            if (tx.From == address) balance -= tx.Amount;
             if (tx.To == address) balance += tx.Amount;
+            if (tx.From == address) balance -= tx.Amount;
         }
         return balance;
     }
 
-    // Confirmed Balance minus what the address already committed in the mempool.
+    // Confirmed balance minus what the address already committed in the mempool.
     private decimal GetAvailableBalance(string address) =>
-    GetBalance(address) - _pending.Where(t => t.From == address).Sum(t => t.Amount);
+        GetBalance(address) - _pending.Where(t => t.From == address).Sum(t => t.Amount);
+
+    private bool IsKnown(string transactionId) =>
+        _pending.Any(t => t.Id == transactionId) ||
+        _chain.SelectMany(b => b.Transactions).Any(t => t.Id == transactionId);
 
     public bool IsValid()
     {
@@ -68,6 +75,8 @@ public class Blockchain
 
             if (current.Hash != current.ComputeHash()) return false;   // content was altered
             if (!current.MeetsDifficulty(Difficulty)) return false;    // no valid proof of work
+            if (current.Transactions.Any(t => !t.HasValidSignature())) // forged or altered transaction
+                return false;
 
             if (i > 0 && current.PreviousHash != _chain[i - 1].Hash)   // link was broken
                 return false;

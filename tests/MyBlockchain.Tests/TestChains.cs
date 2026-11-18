@@ -4,11 +4,11 @@ namespace MyBlockchain.Tests
 {
     internal static class TestChains
     {
-        public static Blockchain Funded(int difficulty = 1)
+        public static Blockchain Funded(Wallet owner, int difficulty = 1)
         {
-            //Chain where "Felipe" already has 100 confirmed coins (temporary faucet).
+            // Chain where "owner" already has confirmmed 100 coins (temporary faucet).
             var bc = new Blockchain(difficulty);
-            bc.TryAddTransaction(new Transaction(Transaction.SystemAddress, "Felipe", 100));
+            bc.TryAddTransaction(new Transaction(Transaction.SystemAddress, owner.Address, 100));
             bc.MinePendingTransactions();
             return bc;
         }
