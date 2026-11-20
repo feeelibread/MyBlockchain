@@ -23,7 +23,7 @@ public sealed record Transaction(string From, string To, decimal Amount)
 
     public bool HasValidSignature()
     {
-        if (IsSystem) return true; // TEMPORARY faucet rule, replaced by mining rewards in step 6
+        if (IsSystem) return true; // Only coinbase transactions are "system"; chain rules restrict where they may appear
         if (string.IsNullOrEmpty(Signature)) return false;
 
         try
