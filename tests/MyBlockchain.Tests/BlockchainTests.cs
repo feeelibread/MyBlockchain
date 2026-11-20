@@ -1,107 +1,151 @@
-using System.Diagnostics.CodeAnalysis;
 using MyBlockchain.Core;
 using static MyBlockchain.Tests.TestChains;
 
-namespace MyBlockchain.Tests
+namespace MyBlockchain.Tests;
+
+[TestClass]
+public class BlockchainTests
 {
-    [TestClass]
-    public class BlockchainTests
+    // ---- Chain structure and mining ----
+
+    [TestMethod]
+    public void NewChain_ContainsOnlyGenesisBlock()
     {
-        [TestMethod]
-        public void NewChain_ConstainsOnlyGenesisBlock()
-        {
-            var bc = new Blockchain();
-            Assert.HasCount(1, bc.Chain);
-            Assert.AreEqual(0, bc.Last.Index);
-            Assert.AreEqual("0", bc.Last.PreviousHash);
-        }
+        var bc = new Blockchain(1);
 
-        [TestMethod]
-        public void MinePending_LinksBlocksToPrevioushBlockHash()
-        {
-            var bc = Funded(new Wallet());
-            Assert.AreEqual(bc.Chain[0].Hash, bc.Last.PreviousHash);
-        }
+        Assert.HasCount(1, bc.Chain);
+        Assert.AreEqual(0, bc.Last.Index);
+        Assert.AreEqual("0", bc.Last.PreviousHash);
+    }
 
-        [TestMethod]
-        public void GetBalance_ReflectsMinedTransactions()
-        {
-            var felipe = new Wallet();
-            var alice = new Wallet();
-            var bc = Funded(felipe);
-            bc.TryAddTransaction(felipe.CreateTransaction(alice.Address, 30));
-            bc.MinePendingTransactions();
+    [TestMethod]
+    public void MinePending_LinksBlockToPreviousBlockHash()
+    {
+        var bc = new Blockchain(1);
+        var genesis = bc.Last;
 
-            Assert.AreEqual(70m, bc.GetBalance(felipe.Address));
-            Assert.AreEqual(30m, bc.GetBalance(alice.Address));
-        }
+        var block = bc.MinePendingTransactions(Miner);
 
-        [TestMethod]
-        public void PendingTransactions_DoNotCountInConfirmedBalance()
-        {
-            var felipe = new Wallet();
-            var alice = new Wallet();
-            var bc = Funded(felipe);
-            bc.TryAddTransaction(felipe.CreateTransaction(alice.Address, 30));
+        Assert.AreEqual(1, block.Index);
+        Assert.AreEqual(genesis.Hash, block.PreviousHash);
+    }
 
-            Assert.HasCount(1, bc.PendingTransactions);
-            Assert.AreEqual(100m, bc.GetBalance(felipe.Address));
-            Assert.AreEqual(0m, bc.GetBalance(alice.Address));
-        }
+    [TestMethod]
+    public void MinePending_MinesBlockAccordingToChainDifficulty()
+    {
+        var bc = new Blockchain(difficulty: 3);
 
-        [TestMethod]
-        public void TryAddTransaction_RejectsInsufficientFunds()
-        {
-            var felipe = new Wallet();
-            var alice = new Wallet();
-            var victor = new Wallet();
-            var bc = Funded(felipe);
+        var block = bc.MinePendingTransactions(Miner);
 
-            Assert.IsFalse(bc.TryAddTransaction(felipe.CreateTransaction(alice.Address, 101m)));
-            Assert.IsFalse(bc.TryAddTransaction(alice.CreateTransaction(victor.Address, 1)));
-            Assert.HasCount(0, bc.PendingTransactions);
-        }
+        Assert.IsTrue(block.MeetsDifficulty(3));
+        Assert.IsTrue(bc.Chain[0].MeetsDifficulty(3)); // genesis is mined too
+    }
 
-        [TestMethod]
-        public void TryAddTransactoin_RejectsDoubleSpendInsideMempool()
-        {
-            var felipe = new Wallet();
-            var victor = new Wallet();
-            var robert = new Wallet();
-            var bc = Funded(felipe);
+    [TestMethod]
+    public void MinePending_AddsCoinbaseRewardAsFirstTransaction()
+    {
+        var bc = new Blockchain(1, blockReward: 100);
 
-            Assert.IsTrue(bc.TryAddTransaction(felipe.CreateTransaction(victor.Address, 80)));
-            Assert.IsFalse(bc.TryAddTransaction(felipe.CreateTransaction(robert.Address, 80))); // only 20 left
-            Assert.IsTrue(bc.TryAddTransaction(felipe.CreateTransaction(robert.Address, 20)));
-        }
+        var block = bc.MinePendingTransactions(Miner);
 
-        [TestMethod]
-        public void TryAddTransaction_RejectsInvalidTransactions()
-        {
-            var felipe = new Wallet();
-            var alice = new Wallet();
-            var bc = Funded(felipe);
+        var coinbase = block.Transactions[0];
+        Assert.IsTrue(coinbase.IsSystem);
+        Assert.AreEqual(Miner, coinbase.To);
+        Assert.AreEqual(100m, coinbase.Amount);
+        Assert.AreEqual(100m, bc.GetBalance(Miner));
+    }
 
-            Assert.IsFalse(bc.TryAddTransaction(felipe.CreateTransaction(alice.Address, 0)));
-            Assert.IsFalse(bc.TryAddTransaction(felipe.CreateTransaction(alice.Address, -1)));
-            Assert.IsFalse(bc.TryAddTransaction(felipe.CreateTransaction(felipe.Address, 10))); // to self
-            Assert.IsFalse(bc.TryAddTransaction(felipe.CreateTransaction("", 0))); // no recipient
+    [TestMethod]
+    public void MinePending_ClearsMempool_AndEmptyBlockOnlyHasTheReward()
+    {
+        var felipe = new Wallet();
+        var victor = new Wallet();
+        var bc = Funded(felipe);
+        bc.TryAddTransaction(felipe.CreateTransaction(victor.Address, 10));
 
-            Assert.HasCount(0, bc.PendingTransactions);
-        }
+        var withTx = bc.MinePendingTransactions(Miner);
+        Assert.IsEmpty(bc.PendingTransactions);
+        Assert.HasCount(2, withTx.Transactions); // coinbase + transfer
 
-        [TestMethod]
-        public void MinePending_ClearsMempool_AndReturnsNullWhenEmpty()
-        {
-            var felipe = new Wallet();
-            var victor = new Wallet();
-            var bc = Funded(felipe);
-            bc.TryAddTransaction(felipe.CreateTransaction(victor.Address, 30m));
+        var empty = bc.MinePendingTransactions(Miner);
+        Assert.HasCount(1, empty.Transactions);  // coinbase only
+    }
 
-            Assert.IsNotNull(bc.MinePendingTransactions());
-            Assert.HasCount(0, bc.PendingTransactions);
-            Assert.IsNull(bc.MinePendingTransactions());
-        }
+    // ---- Balances and mempool ----
 
+    [TestMethod]
+    public void GetBalance_ReflectsMinedTransactions()
+    {
+        var felipe = new Wallet();
+        var victor = new Wallet();
+        var bc = Funded(felipe);
+        bc.TryAddTransaction(felipe.CreateTransaction(victor.Address, 30));
+        bc.MinePendingTransactions(Miner);
+
+        Assert.AreEqual(70m, bc.GetBalance(felipe.Address));
+        Assert.AreEqual(30m, bc.GetBalance(victor.Address));
+        Assert.AreEqual(100m, bc.GetBalance(Miner));
+    }
+
+    [TestMethod]
+    public void PendingTransactions_DoNotCountInConfirmedBalance()
+    {
+        var felipe = new Wallet();
+        var victor = new Wallet();
+        var bc = Funded(felipe);
+
+        bc.TryAddTransaction(felipe.CreateTransaction(victor.Address, 30));
+
+        Assert.HasCount(1, bc.PendingTransactions);
+        Assert.AreEqual(100m, bc.GetBalance(felipe.Address));
+        Assert.AreEqual(0m, bc.GetBalance(victor.Address));
+    }
+
+    [TestMethod]
+    public void TryAddTransaction_Rejects_InsufficientFunds()
+    {
+        var felipe = new Wallet();
+        var victor = new Wallet();
+        var robert = new Wallet();
+        var bc = Funded(felipe);
+
+        Assert.IsFalse(bc.TryAddTransaction(felipe.CreateTransaction(victor.Address, 101)));
+        Assert.IsFalse(bc.TryAddTransaction(victor.CreateTransaction(robert.Address, 1))); // victor has nothing
+        Assert.IsEmpty(bc.PendingTransactions);
+    }
+
+    [TestMethod]
+    public void TryAddTransaction_Rejects_DoubleSpendInsideMempool()
+    {
+        var felipe = new Wallet();
+        var victor = new Wallet();
+        var robert = new Wallet();
+        var bc = Funded(felipe);
+
+        Assert.IsTrue(bc.TryAddTransaction(felipe.CreateTransaction(victor.Address, 80)));
+        Assert.IsFalse(bc.TryAddTransaction(felipe.CreateTransaction(robert.Address, 80))); // only 20 left
+        Assert.IsTrue(bc.TryAddTransaction(felipe.CreateTransaction(robert.Address, 20)));
+    }
+
+    [TestMethod]
+    public void TryAddTransaction_Rejects_InvalidTransactions()
+    {
+        var felipe = new Wallet();
+        var victor = new Wallet();
+        var bc = Funded(felipe);
+
+        Assert.IsFalse(bc.TryAddTransaction(felipe.CreateTransaction(victor.Address, 0)));
+        Assert.IsFalse(bc.TryAddTransaction(felipe.CreateTransaction(victor.Address, -5)));
+        Assert.IsFalse(bc.TryAddTransaction(felipe.CreateTransaction(felipe.Address, 10))); // to self
+        Assert.IsFalse(bc.TryAddTransaction(felipe.CreateTransaction("", 10)));             // no recipient
+    }
+
+    [TestMethod]
+    public void TryAddTransaction_Rejects_SystemTransactions()
+    {
+        var bc = new Blockchain(1);
+
+        // Nobody can mint coins through the mempool.
+        Assert.IsFalse(bc.TryAddTransaction(new Transaction(Transaction.SystemAddress, "thief", 1000)));
     }
 }

@@ -1,41 +1,34 @@
 ﻿using MyBlockchain.Core;
 using System.Diagnostics;
-
-// Every address starts with the same ASN.1 header, so we show the tail.
-static string Short(string address) => "..." + address[^8..];
+using System.Diagnostics.CodeAnalysis;
 
 var felipe = new Wallet();
 var victor = new Wallet();
 var robert = new Wallet();
 
-var bc = new Blockchain(difficulty: 3);
+var bc = new Blockchain(difficulty: 3, blockReward: 50);
 
-// Temporary faucet
-bc.TryAddTransaction(new Transaction(Transaction.SystemAddress, felipe.Address, 100m));
-bc.MinePendingTransactions();
+// Felipe mines the first block and earns the rewards: coins are born here.
+bc.MinePendingTransactions(felipe.Address);
+Console.WriteLine($"Felipe mined the block 1: Felipe: {bc.GetBalance(felipe.Address)}");
 
-Console.WriteLine($"Felipe's address: {Short(felipe.Address)} ({felipe.Address.Length}) hex chars\n");
+// Felipe pays Victor; Robert mines the block that confirms it and earns the next reward.
+bc.TryAddTransaction(felipe.CreateTransaction(victor.Address, 20));
+bc.MinePendingTransactions(robert.Address);
 
-var t1 = felipe.CreateTransaction(victor.Address, 20);
-Console.WriteLine($"Felipe -> Victor 20 (signed):   {bc.TryAddTransaction(t1)}");
 
-var unsigned = new Transaction(felipe.Address, victor.Address, 20);
-Console.WriteLine($"Felipe -> Robert 20 (unsigned):   {bc.TryAddTransaction(unsigned)}");
-
-var forged = victor.CreateTransaction(robert.Address, 50) with { From = felipe.Address };
-Console.WriteLine($"Victor forging Felipe's identity:   {bc.TryAddTransaction(forged)}");
-
-Console.WriteLine($"Replaying Felipe -> Victor 20:   {bc.TryAddTransaction(t1)}");
-
-bc.MinePendingTransactions();
 
 Console.WriteLine();
-
 Console.WriteLine($"Felipe: {bc.GetBalance(felipe.Address)} | Victor: {bc.GetBalance(victor.Address)} | Robert: {bc.GetBalance(robert.Address)}");
+Console.WriteLine($"Total supply: {bc.GetBalance(felipe.Address) + bc.GetBalance(victor.Address) + bc.GetBalance(robert.Address)} (= 2 blocks x 50)");
 Console.WriteLine($"Is Valid? {bc.IsValid()}");
 
-// Attacker edits the amount and RE-MINES the block: hash and PoW are valid again.
+Console.WriteLine();
+Console.WriteLine($"Minting via mempool: {bc.TryAddTransaction(new Transaction(Transaction.SystemAddress, victor.Address, 1000))}");
+
+// Robert (the last miner) pays himself 1000 coins and re-mines: hash and PoW are valid again.
+
 var last = bc.Last;
-last.Transactions[0] = last.Transactions[0] with { Amount = 90 };
+last.Transactions[0] = last.Transactions[0] with { Amount = 1000 };
 last.Mine(bc.Difficulty);
-Console.WriteLine($"After tampering + re-mining: {bc.IsValid()} (signature no longer matches)");
+Console.WriteLine($"Miner pays itself 1000 and re-mines, valid?: {bc.IsValid()}");

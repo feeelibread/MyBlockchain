@@ -6,13 +6,15 @@ public class Blockchain
     private readonly List<Transaction> _pending = new();
 
     public int Difficulty { get; }
+    public decimal BlockReward { get; }
     public IReadOnlyList<Block> Chain => _chain;
     public IReadOnlyList<Transaction> PendingTransactions => _pending;
     public Block Last => _chain[^1];
 
-    public Blockchain(int difficulty = 2)
+    public Blockchain(int difficulty = 2, decimal blockReward = 50m)
     {
         Difficulty = difficulty;
+        BlockReward = blockReward;
 
         var genesis = new Block(0, Array.Empty<Transaction>(), "0");
         genesis.Mine(Difficulty);
@@ -22,6 +24,7 @@ public class Blockchain
     // Validates the transaction and puts it in the mempool (not in the chain yet).
     public bool TryAddTransaction(Transaction tx)
     {
+        if (tx.IsSystem) return false; // coin are only created by mining rewards
         if (string.IsNullOrWhiteSpace(tx.From) || string.IsNullOrWhiteSpace(tx.To)) return false;
         if (tx.From == tx.To) return false;
         if (tx.Amount <= 0) return false;
@@ -35,13 +38,14 @@ public class Blockchain
         return true;
     }
 
-    // Packs all pending transactions into a new mined block.
-    public Block? MinePendingTransactions()
+    // Mines a block with the pending transactions. The miner earns the block reward.
+    public Block MinePendingTransactions(string minerAddress)
     {
-        if (_pending.Count == 0) return null;
+        var coinbase = new Transaction(Transaction.SystemAddress, minerAddress, BlockReward);
 
-        var block = new Block(Last.Index + 1, _pending, Last.Hash);
+        var block = new Block(Last.Index + 1, _pending.Prepend(coinbase), Last.Hash);
         block.Mine(Difficulty);
+
         _chain.Add(block);
         _pending.Clear();
         return block;
@@ -67,19 +71,47 @@ public class Blockchain
         _pending.Any(t => t.Id == transactionId) ||
         _chain.SelectMany(b => b.Transactions).Any(t => t.Id == transactionId);
 
+    // Consensus rule: genesis is empty; every other block starts with exactly one
+    // coinbase paying exactly BlockReward, and has no other system transaction.
+    private bool HasValidCoinbase(Block block)
+    {
+        var txs = block.Transactions;
+
+        if (block.Index == 0) return txs.Count == 0;
+
+        if (txs.Count == 0 || !txs[0].IsSystem || txs[0].Amount != BlockReward) return false;
+        return txs.Skip(1).All(t => !t.IsSystem);
+    }
+
+
+    // Replays the whole chain from the genesis, exactly lke a node joining a network would.
     public bool IsValid()
     {
+        var balances = new Dictionary<string, decimal>();
+        var seenIds = new HashSet<string>();
+
         for (int i = 0; i < _chain.Count; i++)
         {
-            var current = _chain[i];
+            var block = _chain[i];
+            if (block.Hash != block.ComputeHash()) return false; // content was altered
+            if (!block.MeetsDifficulty(Difficulty)) return false; // no valid proof of work
+            if (i > 0 && block.PreviousHash != _chain[i - 1].Hash) return false; // link was broken
+            if (!HasValidCoinbase(block)) return false; // minted wrong amount
 
-            if (current.Hash != current.ComputeHash()) return false;   // content was altered
-            if (!current.MeetsDifficulty(Difficulty)) return false;    // no valid proof of work
-            if (current.Transactions.Any(t => !t.HasValidSignature())) // forged or altered transaction
-                return false;
+            foreach (var tx in block.Transactions)
+            {
+                if (tx.Amount <= 0) return false; // negative amounts would steal funds 
+                if (!tx.HasValidSignature()) return false; // forged or altered
+                if (!seenIds.Add(tx.Id)) return false; // same transaction twice
 
-            if (i > 0 && current.PreviousHash != _chain[i - 1].Hash)   // link was broken
-                return false;
+                if (!tx.IsSystem)
+                {
+                    var funds = balances.GetValueOrDefault(tx.From);
+                    if (funds < tx.Amount) return false; // spending coins that doesn't exists
+                    balances[tx.From] = funds - tx.Amount;
+                }
+                balances[tx.To] = balances.GetValueOrDefault(tx.To) + tx.Amount;
+            }
         }
         return true;
     }

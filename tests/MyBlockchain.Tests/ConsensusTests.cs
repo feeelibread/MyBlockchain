@@ -1,91 +1,144 @@
 using MyBlockchain.Core;
 using static MyBlockchain.Tests.TestChains;
 
-namespace MyBlockchain.Tests
+namespace MyBlockchain.Tests;
+
+// Each test is an attack. IsValid() must catch all of them.
+[TestClass]
+public class ConsensusTests
 {
-    [TestClass]
-    public class ConsensusTests
+    [TestMethod]
+    public void IsValid_ReturnsTrue_ForUntouchedChain()
     {
-        [TestMethod]
-        public void IsValid_ReturnsTrue_ForUntouchableChain()
-        {
-            var felipe = new Wallet();
-            var alice = new Wallet();
-            var bc = Funded(felipe);
-            bc.TryAddTransaction(felipe.CreateTransaction(alice.Address, 30m));
-            bc.MinePendingTransactions();
+        var felipe = new Wallet();
+        var victor = new Wallet();
+        var bc = Funded(felipe);
+        bc.TryAddTransaction(felipe.CreateTransaction(victor.Address, 30));
+        bc.MinePendingTransactions(Miner);
 
-            Assert.IsTrue(bc.IsValid());
+        Assert.IsTrue(bc.IsValid());
+    }
+
+    [TestMethod]
+    public void IsValid_ReturnsFalse_WhenTransactionIsTampered()
+    {
+        var felipe = new Wallet();
+        var bc = Funded(felipe);
+
+        bc.Chain[1].Transactions[0] = new Transaction(Transaction.SystemAddress, felipe.Address, 1_000_000);
+
+        Assert.IsFalse(bc.IsValid());
+    }
+
+    [TestMethod]
+    public void IsValid_ReturnsFalse_WhenTamperedBlockIsRehashed()
+    {
+        var felipe = new Wallet();
+        var victor = new Wallet();
+        var bc = Funded(felipe);
+        bc.TryAddTransaction(felipe.CreateTransaction(victor.Address, 30));
+        bc.MinePendingTransactions(Miner);
+
+        // Attacker edits block 1 AND recalculates its hash...
+        bc.Chain[1].Transactions[0] = new Transaction(Transaction.SystemAddress, felipe.Address, 1_000_000);
+        bc.Chain[1].Rehash();
+
+        // ...but block 2 still points to the old hash.
+        Assert.IsFalse(bc.IsValid());
+    }
+
+    [TestMethod]
+    public void IsValid_ReturnsFalse_WhenBlockHasNoProofOfWork()
+    {
+        var bc = new Blockchain(difficulty: 3);
+        bc.MinePendingTransactions(Miner);
+        var last = bc.Last;
+
+        // Keeps the coinbase rules satisfied (still a valid reward, just to another address)
+        // and the hash coherent, but the block is NOT mined: only the PoW check catches this.
+        for (int i = 0; last.MeetsDifficulty(3); i++)
+        {
+            last.Transactions[0] = new Transaction(Transaction.SystemAddress, $"miner-{i}", bc.BlockReward);
+            last.Rehash();
         }
 
-        [TestMethod]
-        public void IsValid_ReturnsFalse_WhenTransactionIsTampered()
-        {
-            var felipe = new Wallet();
-            var alice = new Wallet();
-            var bc = Funded(felipe);
-            bc.TryAddTransaction(felipe.CreateTransaction(alice.Address, 30m));
-            bc.MinePendingTransactions();
+        Assert.IsFalse(bc.IsValid());
+    }
 
-            // Tamper with the chain
-            bc.Chain[1].Transactions[0] = felipe.CreateTransaction(alice.Address, 300m);
+    [TestMethod]
+    public void IsValid_ReturnsFalse_WhenSignedTransactionIsTamperedAndBlockIsRemined()
+    {
+        var felipe = new Wallet();
+        var victor = new Wallet();
+        var bc = Funded(felipe);
+        bc.TryAddTransaction(felipe.CreateTransaction(victor.Address, 30));
+        bc.MinePendingTransactions(Miner);
 
-            Assert.IsFalse(bc.IsValid());
-        }
+        // Attacker changes the amount AND re-mines the (last) block:
+        // hash, proof of work and link are all valid again...
+        var last = bc.Last;
+        last.Transactions[1] = last.Transactions[1] with { Amount = 90 };
+        last.Mine(bc.Difficulty);
 
-        [TestMethod]
-        public void IsValid_ReturnsFalse_WhenTamperedBlockIsRehashed()
-        {
-            var felipe = new Wallet();
-            var alice = new Wallet();
-            var bc = Funded(felipe);
-            bc.TryAddTransaction(felipe.CreateTransaction(alice.Address, 30m));
-            bc.MinePendingTransactions();
+        // ...but the signature no longer matches the transaction.
+        Assert.IsFalse(bc.IsValid());
+    }
 
-            // Attacker edits block 1 AND recalculate its hash...
-            bc.Chain[1].Transactions[0] = felipe.CreateTransaction(alice.Address, 300m);
-            bc.Chain[1].Rehash();
+    [TestMethod]
+    public void IsValid_ReturnsFalse_WhenMinerPaysItselfMoreThanTheReward()
+    {
+        var bc = new Blockchain(1, blockReward: 100);
+        bc.MinePendingTransactions(Miner);
 
-            // but block 2 still points to the old hash of block 1.
-            Assert.IsFalse(bc.IsValid());
-        }
+        // Miner re-mines its own block with a bigger reward: PoW is valid, the rule is not.
+        var last = bc.Last;
+        last.Transactions[0] = last.Transactions[0] with { Amount = 1000 };
+        last.Mine(bc.Difficulty);
 
-        [TestMethod]
-        public void IsValid_ReturnsFalse_WhenBlockHasNoProofOfWork()
-        {
-            var bc = new Blockchain(difficulty: 3);
-            bc.TryAddTransaction(new Transaction(Transaction.SystemAddress, "someone", 10));
-            bc.MinePendingTransactions();
+        Assert.IsFalse(bc.IsValid());
+    }
 
-            var last = bc.Last;
+    [TestMethod]
+    public void IsValid_ReturnsFalse_WhenBlockHasASecondCoinbase()
+    {
+        var bc = new Blockchain(1, blockReward: 100);
+        bc.MinePendingTransactions(Miner);
 
-            for (int i = 0; last.MeetsDifficulty(bc.Difficulty); i++)
-            {
-                last.Transactions[0] = new Transaction(Transaction.SystemAddress, "someone", 1000 + i);
-                last.Rehash();
-            }
+        var last = bc.Last;
+        last.Transactions.Add(new Transaction(Transaction.SystemAddress, "thief", 100));
+        last.Mine(bc.Difficulty);
 
-            Assert.IsFalse(bc.IsValid());
-        }
+        Assert.IsFalse(bc.IsValid());
+    }
 
-        [TestMethod]
-        public void IsValid_ReturnsFalse_WhenSignedTransactionIsTamperedAndBlockIsRemined()
-        {
-            var felipe = new Wallet();
-            var john = new Wallet();
-            var bc = Funded(felipe);
-            bc.TryAddTransaction(felipe.CreateTransaction(john.Address, 40m));
-            bc.MinePendingTransactions();
+    [TestMethod]
+    public void IsValid_ReturnsFalse_WhenBlockContainsAnOverspend()
+    {
+        var felipe = new Wallet();
+        var victor = new Wallet();
+        var bob = new Wallet();
+        var bc = Funded(felipe);
 
-            // Attacker changes the amount AND re-mines the (last) block:
-            // hash, proof of work and link are all valid again...
-            var last = bc.Last;
-            last.Transactions[0] = last.Transactions[0] with { Amount = 90 };
-            last.Mine(bc.Difficulty);
+        // Malicious miner includes a correctly signed transaction from someone with no funds.
+        var last = bc.Last;
+        last.Transactions.Add(victor.CreateTransaction(bob.Address, 50));
+        last.Mine(bc.Difficulty);
 
-            // ... but the signature no longer matches the transaction
-            Assert.IsFalse(bc.IsValid());
-        }
+        Assert.IsFalse(bc.IsValid());
+    }
 
+    [TestMethod]
+    public void IsValid_ReturnsFalse_WhenBlockContainsANegativeAmount()
+    {
+        var felipe = new Wallet();
+        var victor = new Wallet();
+        var bc = Funded(felipe);
+
+        // victor signs "I send -50 to Felipe", which would pull coins out of his balance.
+        var last = bc.Last;
+        last.Transactions.Add(victor.CreateTransaction(felipe.Address, -50));
+        last.Mine(bc.Difficulty);
+
+        Assert.IsFalse(bc.IsValid());
     }
 }
