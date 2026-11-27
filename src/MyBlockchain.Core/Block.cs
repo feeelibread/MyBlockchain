@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Serialization;
 
 namespace MyBlockchain.Core;
 
@@ -11,19 +12,36 @@ public class Block
     public long Nonce { get; private set; }
     public string Hash { get; private set; }
 
-    // Public list on purpose: lets tests simulate tampering.
-    public List<Transaction> Transactions { get; set; } = new();
+    // Mutable list on purpose: lets tests simulate tampering.
+    public List<Transaction> Transactions { get; }
 
-    public Block(int index, IEnumerable<Transaction> transaction, string previousHash)
+    // New block: the timestamp is "now".
+    public Block(int index, IEnumerable<Transaction> transactions, string previousHash)
+        : this(index, DateTime.UtcNow, transactions, previousHash)
+    {
+    }
+
+    // Explicit timestamp: used by the deterministic genesis block.
+    public Block(int index, DateTime timestamp, IEnumerable<Transaction> transactions, string previousHash)
     {
         Index = index;
-        Timestamp = DateTime.UtcNow;
-        Transactions = transaction.ToList(); // copy, so that the caller can't modify it later
+        Timestamp = timestamp;
+        Transactions = transactions.ToList(); // copy, so the caller can't change it later
         PreviousHash = previousHash;
         Hash = ComputeHash();
     }
 
-    // The nonce is now part of the hashed content.
+    // Used by JSON deserialization to rebuild a block received from another node.
+    // The parameter types must match the property types (List<Transaction>, not IEnumerable).
+    // The hash is taken as sent and is NOT trusted: Blockchain.IsValid recomputes and checks it.
+    [JsonConstructor]
+    public Block(int index, DateTime timestamp, List<Transaction> transactions, string previousHash, long nonce, string hash)
+        : this(index, timestamp, transactions, previousHash)
+    {
+        Nonce = nonce;
+        Hash = hash;
+    }
+
     public string ComputeHash()
     {
         var data = string.Join(";", Transactions.Select(t => t.Serialize()));

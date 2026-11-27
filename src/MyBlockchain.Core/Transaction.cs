@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Serialization;
 
 namespace MyBlockchain.Core;
 
@@ -12,9 +13,11 @@ public sealed record Transaction(string From, string To, decimal Amount)
     public string Id { get; init; } = Guid.NewGuid().ToString("N");
     public string? Signature { get; init; }
 
+    [JsonIgnore]
     public bool IsSystem => From == SystemAddress;
 
     // Exactly what gets signed. Culture-invariant so it is identical on every machine.
+    [JsonIgnore]
     public string Payload =>
         $"{Id}|{From}>{To}:{Amount.ToString(CultureInfo.InvariantCulture)}";
 
@@ -23,7 +26,8 @@ public sealed record Transaction(string From, string To, decimal Amount)
 
     public bool HasValidSignature()
     {
-        if (IsSystem) return true; // Only coinbase transactions are "system"; chain rules restrict where they may appear
+        // Only coinbase transactions are "system"; chain rules restrict where they may appear.
+        if (IsSystem) return true;
         if (string.IsNullOrEmpty(Signature)) return false;
 
         try

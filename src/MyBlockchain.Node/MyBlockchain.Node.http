@@ -1,0 +1,69 @@
+@node1 = http://localhost:5001
+@node2 = http://localhost:5002
+
+### 1. Node 1 wallet (its address is also the miner address)
+GET {{node1}}/wallet
+
+### 2. Connect the nodes to each other (both directions)
+POST {{node1}}/peers
+Content-Type: application/json
+
+{ "url": "http://localhost:5002" }
+
+###
+POST {{node2}}/peers
+Content-Type: application/json
+
+{ "url": "http://localhost:5001" }
+
+### 3. Node 1 mines a block and earns the reward; node 2 syncs by itself
+POST {{node1}}/mine
+
+### 4. Node 2 now has the same chain (2 blocks: genesis + block 1)
+GET {{node2}}/chain
+
+### 5. Copy node 2's address...
+GET {{node2}}/wallet
+
+### 6. ...and paste it in "to": node 1 pays node 2 (the transaction is gossiped)
+POST {{node1}}/wallet/send
+Content-Type: application/json
+
+{ "to": "PASTE_NODE2_ADDRESS_HERE", "amount": 20 }
+
+### 7. Node 2 received the pending transaction through gossip
+GET {{node2}}/pending
+
+### 8. Node 2 mines: confirms the payment and earns a reward; node 1 syncs by itself
+POST {{node2}}/mine
+
+###
+GET {{node1}}/wallet
+
+###
+GET {{node2}}/wallet
+
+### 9. FORK EXPERIMENT. Restart BOTH nodes (Ctrl+C, dotnet run) to wipe everything. Do NOT connect them yet.
+### Node 1 mines twice, node 2 mines once: each one believes in its own chain.
+POST {{node1}}/mine
+
+###
+POST {{node1}}/mine
+
+###
+POST {{node2}}/mine
+
+### Now node 2 meets node 1 and runs the consensus: node 1's chain is longer (3 vs 2).
+POST {{node2}}/peers
+Content-Type: application/json
+
+{ "url": "http://localhost:5001" }
+
+###
+POST {{node2}}/resolve
+
+### Node 2 abandoned its own block: its reward is gone (balance 0) and its chain equals node 1's.
+GET {{node2}}/wallet
+
+###
+GET {{node2}}/status
