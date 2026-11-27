@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/MyBlockchain.Core/MyBlockchain.Core.csproj" />
     <Project Path="src/MyBlockchain.Demo/MyBlockchain.Demo.csproj" />
+    <Project Path="src/MyBlockchain.Node/MyBlockchain.Node.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/MyBlockchain.Tests/MyBlockchain.Tests.csproj" />
